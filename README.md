@@ -36,7 +36,4 @@ Implementar o algoritmo DWA para navegação autônoma e desvio de obstáculos u
 
 1. Abrir a cena no CoppeliaSim
 2. Ativar o servidor ZMQ Remote API
-3. Executar no terminal:
-
-```bash
-python dwa_create2_zmq.py
+3. Executar no terminal: python dwa_create2_zmq.py
