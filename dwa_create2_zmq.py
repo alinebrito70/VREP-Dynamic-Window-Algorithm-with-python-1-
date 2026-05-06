@@ -35,11 +35,11 @@ class Config:
         self.axle_half = 0.12
 
         # Limites virtuais do chão
-        self.x_min = -2.0
-        self.x_max = 2.0
-        self.y_min = -2.0
-        self.y_max = 2.0
-        self.edge_safe = 0.35
+        self.x_min = -1.7
+        self.x_max = 1.7
+        self.y_min = -1.7
+        self.y_max = 1.7
+        self.edge_safe = 0.45
 
 
 def near_edge(x, y, config):
@@ -52,6 +52,29 @@ def near_edge(x, y, config):
     if y > config.y_max - config.edge_safe:
         return "top"
     return None
+
+
+def edge_escape_control(edge, yaw):
+    """
+    Controle simples para fugir da borda.
+    """
+    if edge == "left":
+        target_angle = 0.0
+    elif edge == "right":
+        target_angle = math.pi
+    elif edge == "bottom":
+        target_angle = math.pi / 2
+    elif edge == "top":
+        target_angle = -math.pi / 2
+    else:
+        return 0.0, 0.5
+
+    error = normalize_angle(target_angle - yaw)
+
+    v = 0.015
+    w = max(min(error, 0.7), -0.7)
+
+    return v, w
 
 
 def get_object(sim, names):
@@ -159,7 +182,7 @@ def dwa_control(x, config, goal, obstacles):
                 best_traj = traj
 
     if not np.isfinite(best_cost):
-        best_u = [0.00, 0.5]
+        best_u = [0.0, 0.5]
 
     return best_u, best_traj
 
@@ -228,7 +251,7 @@ def read_sensor_obstacles(sim, sensor_handles):
     return obstacles
 
 
-def get_named_obstacle_handles(sim):
+def get_named_obstacle_handles(sim, body_handle):
     handles = []
     possible_names = []
 
@@ -238,14 +261,14 @@ def get_named_obstacle_handles(sim):
         possible_names.append(f"/OBSTACULO0{i}")
         possible_names.append(f"OBSTACULO0{i}")
 
-    for i in range(20):
+    for i in range(1, 20):
         possible_names.append(f"/Cuboid[{i}]")
         possible_names.append(f"Cuboid[{i}]")
 
     for name in possible_names:
         h = try_get_object(sim, name)
 
-        if h is not None and h not in handles:
+        if h is not None and h != body_handle and h not in handles:
             handles.append(h)
 
     return handles
@@ -373,7 +396,7 @@ def main():
         except Exception:
             pass
 
-    obstacle_handles = get_named_obstacle_handles(sim)
+    obstacle_handles = get_named_obstacle_handles(sim, body)
 
     print(f"Sensores encontrados: {len(sensor_handles)}")
     print(f"Obstáculos encontrados: {len(obstacle_handles)}")
@@ -404,7 +427,7 @@ def main():
         ])
         print(f"Target não encontrado. Objetivo criado à frente: x={goal[0]:.3f}, y={goal[1]:.3f}")
 
-    print("Rodando Janela Dinâmica pelo VSCode e visualizando no CoppeliaSim...")
+    print("Rodando DWA + sensores + proteção de borda...")
 
     current_v = 0.0
     current_w = 0.0
@@ -420,67 +443,61 @@ def main():
             edge = near_edge(x, y, config)
 
             if edge is not None:
-                print(f"PERTO DA BORDA: {edge}, corrigindo rota")
-
-                v = -0.01
-                w = 0.6
-
-                wr, wl = vw_to_wheel_speeds(v, w, config)
-
-                wr = max(min(wr, 1.0), -1.0)
-                wl = max(min(wl, 1.0), -1.0)
-
-                sim.setJointTargetVelocity(motor_right, wr)
-                sim.setJointTargetVelocity(motor_left, wl)
-
-                time.sleep(0.3)
-
-                current_v = v
-                current_w = w
-
-                continue
-
-            state = np.array([x, y, yaw, current_v, current_w], dtype=float)
-
-            obstacles = read_all_obstacles(sim, sensor_handles, obstacle_handles)
-            front_obst = closest_front_obstacle(x, y, yaw, obstacles)
-
-            if front_obst is not None and front_obst["dist"] < config.safe_distance and not avoid_mode:
-                avoid_mode = True
-                avoid_counter = 70
-
-                if front_obst["relative_angle"] >= 0:
-                    avoid_direction = -1
-                else:
-                    avoid_direction = 1
-
-            if avoid_mode:
-                if avoid_counter > 40:
-                    v = 0.00
-                    w = 0.55 * avoid_direction
-                    mode_text = "DESVIANDO: girando"
-                else:
-                    v = 0.025
-                    w = 0.22 * avoid_direction
-                    mode_text = "DESVIANDO: contornando"
-
-                avoid_counter -= 1
-
-                if avoid_counter <= 0:
-                    avoid_mode = False
+                v, w = edge_escape_control(edge, yaw)
+                mode_text = f"BORDA: fugindo da borda {edge}"
 
                 u = [v, w]
 
             else:
-                u, predicted_trajectory = dwa_control(state, config, goal, obstacles)
+                state = np.array([x, y, yaw, current_v, current_w], dtype=float)
 
-                if u[0] < 0.015:
-                    u[0] = 0.015
+                obstacles = read_all_obstacles(sim, sensor_handles, obstacle_handles)
+                front_obst = closest_front_obstacle(x, y, yaw, obstacles)
 
-                if abs(u[1]) > 0.30:
-                    u[1] = 0.30 if u[1] > 0 else -0.30
+                if front_obst is not None and front_obst["dist"] < config.emergency_distance:
+                    print("OBSTÁCULO MUITO PERTO: dando ré")
+                    u = [-0.012, 0.65]
+                    mode_text = "EMERGÊNCIA: ré e giro"
 
-                mode_text = "DWA normal"
+                elif front_obst is not None and front_obst["dist"] < config.safe_distance and not avoid_mode:
+                    avoid_mode = True
+                    avoid_counter = 70
+
+                    if front_obst["relative_angle"] >= 0:
+                        avoid_direction = -1
+                    else:
+                        avoid_direction = 1
+
+                    u = [0.0, 0.55 * avoid_direction]
+                    mode_text = "INICIANDO DESVIO"
+
+                elif avoid_mode:
+                    if avoid_counter > 40:
+                        v = 0.0
+                        w = 0.55 * avoid_direction
+                        mode_text = "DESVIANDO: girando"
+                    else:
+                        v = 0.025
+                        w = 0.22 * avoid_direction
+                        mode_text = "DESVIANDO: contornando"
+
+                    avoid_counter -= 1
+
+                    if avoid_counter <= 0:
+                        avoid_mode = False
+
+                    u = [v, w]
+
+                else:
+                    u, predicted_trajectory = dwa_control(state, config, goal, obstacles)
+
+                    if u[0] < 0.015:
+                        u[0] = 0.015
+
+                    if abs(u[1]) > 0.30:
+                        u[1] = 0.30 if u[1] > 0 else -0.30
+
+                    mode_text = "DWA normal"
 
             wr, wl = vw_to_wheel_speeds(u[0], u[1], config)
 
@@ -495,19 +512,12 @@ def main():
 
             dist_goal = math.hypot(goal[0] - x, goal[1] - y)
 
-            if front_obst is None:
-                obst_text = "sem obstaculo frontal"
-            else:
-                obst_text = f"obst_frente={front_obst['dist']:.2f}"
-
             print(
                 f"passo={step:03d} | "
                 f"{mode_text} | "
                 f"x={x:.3f} y={y:.3f} yaw={yaw:.2f} | "
                 f"v={u[0]:.3f} w={u[1]:.2f} | "
                 f"wr={wr:.2f} wl={wl:.2f} | "
-                f"obst={len(obstacles)} | "
-                f"{obst_text} | "
                 f"dist_goal={dist_goal:.3f}"
             )
 
