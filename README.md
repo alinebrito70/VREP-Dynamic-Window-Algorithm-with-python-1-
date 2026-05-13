@@ -43,8 +43,6 @@ A partir disso, o robô escolhe a melhor combinação de velocidade linear (v) e
 * Integração Python + CoppeliaSim
 * Leitura dos sensores de proximidade
 * Navegação até o Target
-* Desvio de obstáculos
-* Proteção virtual contra bordas da arena
 * Sistema de emergência para obstáculos próximos
 * Controle diferencial das rodas
 * Parada segura antes de alcançar o objetivo
