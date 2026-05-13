@@ -13,530 +13,406 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 class Config:
     def __init__(self):
-        self.max_speed = 0.035
-        self.min_speed = 0.015
-        self.max_yaw_rate = 0.7
+        self.max_speed = 0.25
+        self.min_speed = 0.0
 
-        self.v_resolution = 0.005
-        self.yaw_rate_resolution = 0.15
+        self.max_yaw_rate = 90.0 * math.pi / 180.0
+        self.max_accel = 0.25
+        self.max_delta_yaw_rate = 120.0 * math.pi / 180.0
 
-        self.dt = 0.05
-        self.predict_time = 1.0
+        self.v_resolution = 0.01
+        self.yaw_rate_resolution = 3.0 * math.pi / 180.0
 
-        self.to_goal_cost_gain = 1.2
-        self.speed_cost_gain = 0.3
-        self.obstacle_cost_gain = 5.0
+        self.dt = 0.10
+        self.predict_time = 2.0
 
-        self.robot_radius = 0.22
-        self.safe_distance = 0.65
-        self.emergency_distance = 0.42
+        self.to_goal_cost_gain = 3.0
+        self.angle_cost_gain = 4.0
+        self.speed_cost_gain = 0.2
+        self.obstacle_cost_gain = 2.0
 
-        self.wheel_radius = 0.036
-        self.axle_half = 0.12
+        self.robot_radius = 0.28
+        self.safety_margin = 0.20
+        self.stop_goal_distance = 0.50
 
-        # Limites virtuais do chão
-        self.x_min = -1.7
-        self.x_max = 1.7
-        self.y_min = -1.7
-        self.y_max = 1.7
-        self.edge_safe = 0.45
+        self.wheel_radius = 0.0975 / 2
+        self.axle_half = 0.165
 
+        self.brake_accel = 0.25
 
-def near_edge(x, y, config):
-    if x < config.x_min + config.edge_safe:
-        return "left"
-    if x > config.x_max - config.edge_safe:
-        return "right"
-    if y < config.y_min + config.edge_safe:
-        return "bottom"
-    if y > config.y_max - config.edge_safe:
-        return "top"
-    return None
+        self.x_min = -2.5
+        self.x_max = 2.5
+        self.y_min = -2.5
+        self.y_max = 2.5
+
+        self.left_sign = 1
+        self.right_sign = 1
+        self.rotation_sign = 1
 
 
-def edge_escape_control(edge, yaw):
-    """
-    Controle simples para fugir da borda.
-    """
-    if edge == "left":
-        target_angle = 0.0
-    elif edge == "right":
-        target_angle = math.pi
-    elif edge == "bottom":
-        target_angle = math.pi / 2
-    elif edge == "top":
-        target_angle = -math.pi / 2
-    else:
-        return 0.0, 0.5
-
-    error = normalize_angle(target_angle - yaw)
-
-    v = 0.015
-    w = max(min(error, 0.7), -0.7)
-
-    return v, w
+def normalize_angle(a):
+    return math.atan2(math.sin(a), math.cos(a))
 
 
-def get_object(sim, names):
-    for name in names:
-        try:
-            return sim.getObject(name)
-        except Exception:
-            pass
-    raise Exception(f"Objeto não encontrado. Tentei estes nomes: {names}")
-
-
-def try_get_object(sim, name):
+def get_obj(sim, name):
     try:
-        return sim.getObject(name)
+        h = sim.getObject(name)
+        print("Encontrado:", name)
+        return h
     except Exception:
+        print("NÃO encontrei:", name)
         return None
 
 
-def normalize_angle(angle):
-    return math.atan2(math.sin(angle), math.cos(angle))
+def stop_robot(sim, left_motor, right_motor):
+    sim.setJointTargetVelocity(left_motor, 0)
+    sim.setJointTargetVelocity(right_motor, 0)
 
 
-def get_pose(sim, body_handle):
-    pos = sim.getObjectPosition(body_handle, -1)
-    ori = sim.getObjectOrientation(body_handle, -1)
-    return pos[0], pos[1], ori[2]
+def get_yaw(sim, sensor_front, robot):
+    try:
+        ori = sim.getObjectOrientation(sensor_front, -1)
+        return ori[2]
+    except Exception:
+        ori = sim.getObjectOrientation(robot, -1)
+        return ori[2]
 
 
 def motion(x, u, dt):
+    v = u[0]
+    w = u[1]
+
     x = np.array(x, dtype=float)
-    x[2] += u[1] * dt
-    x[2] = normalize_angle(x[2])
-    x[0] += u[0] * math.cos(x[2]) * dt
-    x[1] += u[0] * math.sin(x[2]) * dt
-    x[3] = u[0]
-    x[4] = u[1]
+
+    x[2] = normalize_angle(x[2] + w * dt)
+    x[0] += v * math.cos(x[2]) * dt
+    x[1] += v * math.sin(x[2]) * dt
+    x[3] = v
+    x[4] = w
+
     return x
+
+
+def calc_dynamic_window(x, config):
+    Vs = [
+        config.min_speed,
+        config.max_speed,
+        -config.max_yaw_rate,
+        config.max_yaw_rate
+    ]
+
+    Vd = [
+        x[3] - config.max_accel * config.dt,
+        x[3] + config.max_accel * config.dt,
+        x[4] - config.max_delta_yaw_rate * config.dt,
+        x[4] + config.max_delta_yaw_rate * config.dt
+    ]
+
+    return [
+        max(Vs[0], Vd[0]),
+        min(Vs[1], Vd[1]),
+        max(Vs[2], Vd[2]),
+        min(Vs[3], Vd[3])
+    ]
 
 
 def predict_trajectory(x_init, v, w, config):
     x = np.array(x_init, dtype=float)
-    trajectory = np.array([x])
+    traj = [x.copy()]
 
     t = 0.0
+
     while t <= config.predict_time:
         x = motion(x, [v, w], config.dt)
-        trajectory = np.vstack((trajectory, x))
+        traj.append(x.copy())
         t += config.dt
 
-    return trajectory
+    return np.array(traj)
 
 
-def calc_to_goal_cost(trajectory, goal):
-    dx = goal[0] - trajectory[-1, 0]
-    dy = goal[1] - trajectory[-1, 1]
+def stopping_distance(v, config):
+    return (v * v) / (2.0 * config.brake_accel)
+
+
+def calc_goal_cost(traj, goal):
+    dx = goal[0] - traj[-1, 0]
+    dy = goal[1] - traj[-1, 1]
+    return math.hypot(dx, dy)
+
+
+def calc_angle_cost(traj, goal):
+    dx = goal[0] - traj[-1, 0]
+    dy = goal[1] - traj[-1, 1]
+
     target_angle = math.atan2(dy, dx)
-    error_angle = normalize_angle(target_angle - trajectory[-1, 2])
-    return abs(error_angle)
+    robot_angle = traj[-1, 2]
+
+    return abs(normalize_angle(target_angle - robot_angle))
 
 
-def calc_obstacle_cost(trajectory, obstacles, config):
-    if obstacles.size == 0:
+def calc_obstacle_cost(traj, obstacles, v, config):
+    if obstacles is None or len(obstacles) == 0:
         return 0.0
 
-    ox = obstacles[:, 0]
-    oy = obstacles[:, 1]
+    obstacles = np.array(obstacles, dtype=float)
 
-    dx = trajectory[:, 0][:, None] - ox[None, :]
-    dy = trajectory[:, 1][:, None] - oy[None, :]
+    dx = traj[:, 0][:, None] - obstacles[:, 0][None, :]
+    dy = traj[:, 1][:, None] - obstacles[:, 1][None, :]
 
-    distances = np.hypot(dx, dy)
+    dist = np.hypot(dx, dy)
 
-    if np.any(distances <= config.robot_radius):
+    min_dist = np.min(dist)
+
+    safe_distance = config.robot_radius + config.safety_margin + stopping_distance(abs(v), config)
+
+    if min_dist <= safe_distance:
         return float("inf")
 
-    min_distance = np.min(distances)
-
-    if min_distance <= 0:
-        return float("inf")
-
-    return 1.0 / min_distance
+    return 1.0 / min_dist
 
 
 def dwa_control(x, config, goal, obstacles):
-    best_u = [0.02, 0.0]
+    dw = calc_dynamic_window(x, config)
+
+    best_u = [0.0, 0.0]
     best_cost = float("inf")
-    best_traj = np.array([x])
 
-    v_values = np.arange(config.min_speed, config.max_speed + 1e-6, config.v_resolution)
-    w_values = np.arange(-config.max_yaw_rate, config.max_yaw_rate + 1e-6, config.yaw_rate_resolution)
+    for v in np.arange(dw[0], dw[1] + config.v_resolution, config.v_resolution):
+        for w in np.arange(dw[2], dw[3] + config.yaw_rate_resolution, config.yaw_rate_resolution):
 
-    for v in v_values:
-        for w in w_values:
             traj = predict_trajectory(x, v, w, config)
 
-            to_goal_cost = config.to_goal_cost_gain * calc_to_goal_cost(traj, goal)
-            speed_cost = config.speed_cost_gain * (config.max_speed - v)
-            obstacle_cost = config.obstacle_cost_gain * calc_obstacle_cost(traj, obstacles, config)
+            obstacle_cost = calc_obstacle_cost(traj, obstacles, v, config)
 
-            final_cost = to_goal_cost + speed_cost + obstacle_cost
+            if obstacle_cost == float("inf"):
+                continue
+
+            goal_cost = config.to_goal_cost_gain * calc_goal_cost(traj, goal)
+            angle_cost = config.angle_cost_gain * calc_angle_cost(traj, goal)
+            speed_cost = config.speed_cost_gain * (config.max_speed - v)
+            obstacle_cost = config.obstacle_cost_gain * obstacle_cost
+
+            final_cost = goal_cost + angle_cost + speed_cost + obstacle_cost
 
             if final_cost < best_cost:
                 best_cost = final_cost
                 best_u = [v, w]
-                best_traj = traj
 
-    if not np.isfinite(best_cost):
-        best_u = [0.0, 0.5]
+    if best_cost == float("inf"):
+        return [0.0, 0.8]
 
-    return best_u, best_traj
-
-
-def vw_to_wheel_speeds(v, w, config):
-    wr = (v + config.axle_half * w) / config.wheel_radius
-    wl = (v - config.axle_half * w) / config.wheel_radius
-    return wr, wl
+    return best_u
 
 
-def parse_sensor_data(data):
-    if not isinstance(data, (list, tuple)):
-        return None
+def transform_point(matrix, point):
+    x = matrix[0] * point[0] + matrix[1] * point[1] + matrix[2] * point[2] + matrix[3]
+    y = matrix[4] * point[0] + matrix[5] * point[1] + matrix[6] * point[2] + matrix[7]
 
-    if len(data) == 0:
-        return None
-
-    detected = data[0]
-
-    if detected <= 0:
-        return None
-
-    if len(data) >= 3 and isinstance(data[2], (list, tuple)):
-        return data[2]
-
-    if len(data) >= 2 and isinstance(data[1], (list, tuple)):
-        return data[1]
-
-    if len(data) >= 2 and isinstance(data[1], (int, float)):
-        return [float(data[1]), 0.0, 0.0]
-
-    return None
+    return [x, y]
 
 
-def local_point_to_world_2d(sim, sensor, local_point):
-    s_pos = sim.getObjectPosition(sensor, -1)
-    s_ori = sim.getObjectOrientation(sensor, -1)
+def get_sensor_obstacles(sim, sensors):
+    obs = []
 
-    distance = math.sqrt(
-        local_point[0] ** 2 +
-        local_point[1] ** 2 +
-        local_point[2] ** 2
-    )
-
-    ox = s_pos[0] + distance * math.cos(s_ori[2])
-    oy = s_pos[1] + distance * math.sin(s_ori[2])
-
-    return ox, oy
-
-
-def read_sensor_obstacles(sim, sensor_handles):
-    obstacles = []
-
-    for sensor in sensor_handles:
+    for s in sensors:
         try:
-            data = sim.readProximitySensor(sensor)
-            local_point = parse_sensor_data(data)
+            result = sim.readProximitySensor(s)
 
-            if local_point is not None:
-                ox, oy = local_point_to_world_2d(sim, sensor, local_point)
-                obstacles.append([ox, oy])
+            detected = result[0]
+            point = result[2]
+
+            if detected > 0:
+                matrix = sim.getObjectMatrix(s, -1)
+                obs.append(transform_point(matrix, point))
 
         except Exception:
             pass
 
-    return obstacles
+    return obs
 
 
-def get_named_obstacle_handles(sim, body_handle):
-    handles = []
-    possible_names = []
+def get_cuboid_obstacles(sim):
+    obs = []
 
-    for i in range(1, 20):
-        possible_names.append(f"/OBSTACULO{i}")
-        possible_names.append(f"OBSTACULO{i}")
-        possible_names.append(f"/OBSTACULO0{i}")
-        possible_names.append(f"OBSTACULO0{i}")
+    cuboids = [
+        "/Cuboid[1]",
+        "/Cuboid[2]",
+        "/Cuboid[3]",
+        "/Cuboid[4]",
+        "/Cuboid[5]",
+        "/Cuboid[6]",
+        "/Cuboid[7]",
+        "/Cuboid[8]"
+    ]
 
-    for i in range(1, 20):
-        possible_names.append(f"/Cuboid[{i}]")
-        possible_names.append(f"Cuboid[{i}]")
-
-    for name in possible_names:
-        h = try_get_object(sim, name)
-
-        if h is not None and h != body_handle and h not in handles:
-            handles.append(h)
-
-    return handles
-
-
-def read_named_obstacles(sim, obstacle_handles):
-    obstacles = []
-
-    for h in obstacle_handles:
+    for name in cuboids:
         try:
-            pos = sim.getObjectPosition(h, -1)
-            obstacles.append([pos[0], pos[1]])
+            obj = sim.getObject(name)
+            pos = sim.getObjectPosition(obj, -1)
+
+            for dx in np.arange(-0.40, 0.41, 0.10):
+                for dy in np.arange(-0.40, 0.41, 0.10):
+                    obs.append([pos[0] + dx, pos[1] + dy])
+
         except Exception:
             pass
 
-    return obstacles
+    return obs
 
 
-def read_all_obstacles(sim, sensor_handles, obstacle_handles):
-    obstacles = []
-    obstacles.extend(read_sensor_obstacles(sim, sensor_handles))
-    obstacles.extend(read_named_obstacles(sim, obstacle_handles))
+def get_wall_obstacles(config):
+    obs = []
 
-    if len(obstacles) == 0:
-        return np.empty((0, 2))
+    for x in np.arange(config.x_min, config.x_max + 0.1, 0.10):
+        obs.append([x, config.y_min])
+        obs.append([x, config.y_max])
 
-    return np.array(obstacles, dtype=float)
+    for y in np.arange(config.y_min, config.y_max + 0.1, 0.10):
+        obs.append([config.x_min, y])
+        obs.append([config.x_max, y])
 
-
-def closest_front_obstacle(x, y, yaw, obstacles):
-    if obstacles.size == 0:
-        return None
-
-    closest = None
-    min_dist = float("inf")
-
-    for ox, oy in obstacles:
-        dx = ox - x
-        dy = oy - y
-
-        dist = math.hypot(dx, dy)
-        angle_to_obstacle = math.atan2(dy, dx)
-        relative_angle = normalize_angle(angle_to_obstacle - yaw)
-
-        is_front = abs(relative_angle) < math.radians(90)
-
-        if is_front and dist < min_dist:
-            min_dist = dist
-            closest = {
-                "dist": dist,
-                "relative_angle": relative_angle,
-                "x": ox,
-                "y": oy
-            }
-
-    return closest
+    return obs
 
 
-def stop_if_running(sim):
-    try:
-        state = sim.getSimulationState()
+def send_velocity(sim, left_motor, right_motor, v, w, config):
+    w = w * config.rotation_sign
 
-        if state != sim.simulation_stopped:
-            sim.stopSimulation()
-            time.sleep(1.0)
+    right = (v + config.axle_half * w) / config.wheel_radius
+    left = (v - config.axle_half * w) / config.wheel_radius
 
-    except Exception:
-        pass
+    sim.setJointTargetVelocity(right_motor, config.right_sign * right)
+    sim.setJointTargetVelocity(left_motor, config.left_sign * left)
+
+
+def calibrate_forward(sim, robot, sensor_front, left_motor, right_motor, config):
+    print("Calibrando sentido para frente...")
+
+    p0 = sim.getObjectPosition(robot, -1)
+    yaw = get_yaw(sim, sensor_front, robot)
+
+    send_velocity(sim, left_motor, right_motor, 0.08, 0.0, config)
+
+    time.sleep(0.45)
+
+    stop_robot(sim, left_motor, right_motor)
+
+    time.sleep(0.2)
+
+    p1 = sim.getObjectPosition(robot, -1)
+
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+
+    frente_x = math.cos(yaw)
+    frente_y = math.sin(yaw)
+
+    produto = dx * frente_x + dy * frente_y
+
+    if produto < 0:
+        config.left_sign *= -1
+        config.right_sign *= -1
+        print("Motores invertidos automaticamente.")
+    else:
+        print("Sentido dos motores OK.")
 
 
 def main():
-    print("Iniciando conexão com o CoppeliaSim...")
+    print("Conectando ao CoppeliaSim...")
 
-    client = RemoteAPIClient(host="127.0.0.1", port=23000)
+    client = RemoteAPIClient("127.0.0.1", 23000)
     sim = client.getObject("sim")
-
-    print("Conectado ao CoppeliaSim!")
-
-    motor_right = get_object(sim, [
-        "/MOTOR_DIREITO",
-        "MOTOR_DIREITO",
-        "/Pioneer_p3dx_rightMotor",
-        "Pioneer_p3dx_rightMotor",
-        "/Pioneer_p3dx/rightMotor",
-        "/rightMotor",
-        "rightMotor"
-    ])
-
-    motor_left = get_object(sim, [
-        "/MOTOR_ESQUERDO",
-        "MOTOR_ESQUERDO",
-        "/Pioneer_p3dx_leftMotor",
-        "Pioneer_p3dx_leftMotor",
-        "/Pioneer_p3dx/leftMotor",
-        "/leftMotor",
-        "leftMotor"
-    ])
-
-    body = get_object(sim, [
-        "/Cuboid[0]",
-        "Cuboid[0]",
-        "/Pioneer_p3dx",
-        "Pioneer_p3dx",
-        "/Cuboid",
-        "Cuboid"
-    ])
-
-    target = try_get_object(sim, "/Target")
-    if target is None:
-        target = try_get_object(sim, "Target")
-
-    sensor_handles = []
-
-    sensor_names = [
-        ["/SENSOR_MEIO", "SENSOR_MEIO"],
-        ["/SENSOR_DIREITO", "SENSOR_DIREITO"],
-        ["/SENSOR_DIAG_DIREITO", "SENSOR_DIAG_DIREITO"],
-        ["/SENSOR_ESQUERDO", "SENSOR_ESQUERDO"],
-        ["/SENSOR_DIAG_ESQUERDO", "SENSOR_DIAG_ESQUERDO"],
-    ]
-
-    for names in sensor_names:
-        try:
-            sensor_handles.append(get_object(sim, names))
-        except Exception:
-            pass
-
-    obstacle_handles = get_named_obstacle_handles(sim, body)
-
-    print(f"Sensores encontrados: {len(sensor_handles)}")
-    print(f"Obstáculos encontrados: {len(obstacle_handles)}")
 
     config = Config()
 
-    stop_if_running(sim)
+    motor_right = get_obj(sim, "/MOTOR_DIREITO")
+    motor_left = get_obj(sim, "/MOTOR_ESQUERDO")
+    robot = get_obj(sim, "/Cylinder")
+    target = get_obj(sim, "/Target")
 
-    print("Iniciando simulação...")
+    sensor_front = get_obj(sim, "/SENSOR_MEIO")
+
+    sensor_names = [
+        "/SENSOR_MEIO",
+        "/SENSOR_DIREITO",
+        "/SENSOR_DIAG_DIREITO",
+        "/SENSOR_ESQUERDO",
+        "/SENSOR_DIAG_ESQUERDO"
+    ]
+
+    sensors = []
+
+    for name in sensor_names:
+        s = get_obj(sim, name)
+
+        if s is not None:
+            sensors.append(s)
+
+    if motor_right is None or motor_left is None or robot is None or target is None:
+        print("ERRO: motor, robô ou target não encontrado.")
+        return
+
     sim.startSimulation()
-    time.sleep(1.0)
+
+    time.sleep(0.5)
+
+    calibrate_forward(sim, robot, sensor_front, motor_left, motor_right, config)
+
+    u_prev = [0.0, 0.0]
 
     try:
-        config.dt = float(sim.getSimulationTimeStep())
-    except Exception:
-        config.dt = 0.05
+        while True:
+            robot_pos = sim.getObjectPosition(robot, -1)
+            target_pos = sim.getObjectPosition(target, -1)
 
-    x0, y0, yaw0 = get_pose(sim, body)
+            yaw = get_yaw(sim, sensor_front, robot)
 
-    if target is not None:
-        target_pos = sim.getObjectPosition(target, -1)
-        goal = np.array([target_pos[0], target_pos[1]])
-        print(f"Objetivo definido no Target: x={goal[0]:.3f}, y={goal[1]:.3f}")
-    else:
-        goal = np.array([
-            x0 + 2.0 * math.cos(yaw0),
-            y0 + 2.0 * math.sin(yaw0)
-        ])
-        print(f"Target não encontrado. Objetivo criado à frente: x={goal[0]:.3f}, y={goal[1]:.3f}")
+            goal = np.array([target_pos[0], target_pos[1]])
 
-    print("Rodando DWA + sensores + proteção de borda...")
-
-    current_v = 0.0
-    current_w = 0.0
-
-    avoid_mode = False
-    avoid_counter = 0
-    avoid_direction = 1
-
-    try:
-        for step in range(800):
-            x, y, yaw = get_pose(sim, body)
-
-            edge = near_edge(x, y, config)
-
-            if edge is not None:
-                v, w = edge_escape_control(edge, yaw)
-                mode_text = f"BORDA: fugindo da borda {edge}"
-
-                u = [v, w]
-
-            else:
-                state = np.array([x, y, yaw, current_v, current_w], dtype=float)
-
-                obstacles = read_all_obstacles(sim, sensor_handles, obstacle_handles)
-                front_obst = closest_front_obstacle(x, y, yaw, obstacles)
-
-                if front_obst is not None and front_obst["dist"] < config.emergency_distance:
-                    print("OBSTÁCULO MUITO PERTO: dando ré")
-                    u = [-0.012, 0.65]
-                    mode_text = "EMERGÊNCIA: ré e giro"
-
-                elif front_obst is not None and front_obst["dist"] < config.safe_distance and not avoid_mode:
-                    avoid_mode = True
-                    avoid_counter = 70
-
-                    if front_obst["relative_angle"] >= 0:
-                        avoid_direction = -1
-                    else:
-                        avoid_direction = 1
-
-                    u = [0.0, 0.55 * avoid_direction]
-                    mode_text = "INICIANDO DESVIO"
-
-                elif avoid_mode:
-                    if avoid_counter > 40:
-                        v = 0.0
-                        w = 0.55 * avoid_direction
-                        mode_text = "DESVIANDO: girando"
-                    else:
-                        v = 0.025
-                        w = 0.22 * avoid_direction
-                        mode_text = "DESVIANDO: contornando"
-
-                    avoid_counter -= 1
-
-                    if avoid_counter <= 0:
-                        avoid_mode = False
-
-                    u = [v, w]
-
-                else:
-                    u, predicted_trajectory = dwa_control(state, config, goal, obstacles)
-
-                    if u[0] < 0.015:
-                        u[0] = 0.015
-
-                    if abs(u[1]) > 0.30:
-                        u[1] = 0.30 if u[1] > 0 else -0.30
-
-                    mode_text = "DWA normal"
-
-            wr, wl = vw_to_wheel_speeds(u[0], u[1], config)
-
-            wr = max(min(wr, 1.0), -1.0)
-            wl = max(min(wl, 1.0), -1.0)
-
-            sim.setJointTargetVelocity(motor_right, wr)
-            sim.setJointTargetVelocity(motor_left, wl)
-
-            current_v = u[0]
-            current_w = u[1]
-
-            dist_goal = math.hypot(goal[0] - x, goal[1] - y)
-
-            print(
-                f"passo={step:03d} | "
-                f"{mode_text} | "
-                f"x={x:.3f} y={y:.3f} yaw={yaw:.2f} | "
-                f"v={u[0]:.3f} w={u[1]:.2f} | "
-                f"wr={wr:.2f} wl={wl:.2f} | "
-                f"dist_goal={dist_goal:.3f}"
+            dist_goal = math.hypot(
+                goal[0] - robot_pos[0],
+                goal[1] - robot_pos[1]
             )
 
-            if dist_goal < 0.18:
-                print("Objetivo alcançado!")
+            if dist_goal <= config.stop_goal_distance:
+                print("Chegou perto do target e parou antes de encostar.")
+                stop_robot(sim, motor_left, motor_right)
                 break
+
+            x_state = np.array([
+                robot_pos[0],
+                robot_pos[1],
+                yaw,
+                u_prev[0],
+                u_prev[1]
+            ])
+
+            obstacles = []
+            obstacles.extend(get_sensor_obstacles(sim, sensors))
+            obstacles.extend(get_cuboid_obstacles(sim))
+            obstacles.extend(get_wall_obstacles(config))
+
+            u = dwa_control(x_state, config, goal, obstacles)
+
+            u_prev = u
+
+            send_velocity(sim, motor_left, motor_right, u[0], u[1], config)
+
+            print(
+                f"dist_target={dist_goal:.2f} | "
+                f"v={u[0]:.2f} | "
+                f"w={u[1]:.2f} | "
+                f"obst={len(obstacles)}"
+            )
 
             time.sleep(config.dt)
 
+    except KeyboardInterrupt:
+        print("Interrompido.")
+
     finally:
-        print("Parando robô...")
-
-        sim.setJointTargetVelocity(motor_right, 0.0)
-        sim.setJointTargetVelocity(motor_left, 0.0)
-
-        time.sleep(0.5)
-
+        stop_robot(sim, motor_left, motor_right)
         sim.stopSimulation()
-        print("Simulação encerrada.")
+        print("Fim.")
 
 
 if __name__ == "__main__":
