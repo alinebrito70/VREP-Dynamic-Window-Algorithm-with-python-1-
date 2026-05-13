@@ -53,7 +53,7 @@ A partir disso, o robô escolhe a melhor combinação de velocidade linear (v) e
 
 * `dwa_create2_zmq.py` → implementação principal do DWA
 * `teste_conexao_zmq.py` → teste de conexão com o CoppeliaSim
-* `dynamic_window_mirror.ttt` → cena principal de simulação
+* `BASE_FUNCIONAL_INVISIVEL (certo).ttt` → cena principal de simulação
 * `script_create.py` → scripts auxiliares
 * `script_mirror.py` → scripts auxiliares
 * `Relatorio.pdf` → relatório final do projeto
@@ -67,7 +67,7 @@ A partir disso, o robô escolhe a melhor combinação de velocidade linear (v) e
 Abrir o arquivo:
 
 ```bash
-dynamic_window_mirror.ttt
+BASE_FUNCIONAL_INVISIVEL (certo).ttt
 ```
 
 ---
@@ -104,17 +104,7 @@ O sistema também realiza parada segura antes de alcançar o objetivo, respeitan
 
 ---
 
-## Vídeo de Demonstração
-
-(Adicionar aqui o link do vídeo quando enviar)
-
-Exemplo:
-
-```text
-https://drive.google.com/SEU-LINK-AQUI
-```
-
----
+video demonstrativo na pasta, chamado de "Video do robo duncionando.mp4"
 
 ## Referências
 
