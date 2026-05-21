@@ -127,7 +127,7 @@ O robô consegue:
 
 ---
 
-# 👨‍💻 Autora
+# 👩🏽‍💻 Autora
 
 Aline de Brito Sério.
 
