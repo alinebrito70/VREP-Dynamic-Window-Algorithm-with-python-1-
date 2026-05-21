@@ -127,9 +127,9 @@ O robô consegue:
 
 ---
 
-# 👨‍💻 Autor
+# 👨‍💻 Autora
 
-Projeto desenvolvido para a disciplina de **Robótica I**.
+Aline de Brito Sério.
 
 ---
 
