@@ -7,9 +7,13 @@ Objetivo
 Implementar um sistema capaz de:
 
 seguir um alvo (Target)
+
 evitar obstáculos
+
 navegar autonomamente
+
 utilizar sensores de proximidade
+
 controlar movimento diferencial das rodas
 
 Toda a lógica foi desenvolvida em Python utilizando comunicação com o CoppeliaSim via ZMQ Remote API.
@@ -31,8 +35,6 @@ Parada automática ao alcançar o objetivo
 Estrutura do Projeto
 📂 VREP-Dynamic-Window-Algorithm-with-python
 
-│
-
 ├── dwa_create2_zmq.py
 
 ├── teste_conexao_zmq.py
@@ -48,23 +50,33 @@ Estrutura do Projeto
 └── README.md
 
 Como Executar
+
 1. Abrir o cenário no CoppeliaSim
 cenario_dwa_funcional.ttt
-2. Iniciar a simulação
+
+3. Iniciar a simulação
 Simulation -> Start
-3. Executar o código Python
+
+5. Executar o código Python
 python dwa_create2_zmq.py
+
 Resultados
 
 O robô consegue:
 
 localizar o Target
+
 evitar obstáculos
+
 sair de regiões presas
+
 navegar autonomamente no ambiente
 
 Referências
 FOX, Dieter; BURGARD, Wolfram; THRUN, Sebastian. The Dynamic Window Approach to Collision Avoidance.
+
 PythonRobotics — Dynamic Window Approach
+
 Documentação oficial do CoppeliaSim
+
 Documentação oficial da ZMQ Remote API
