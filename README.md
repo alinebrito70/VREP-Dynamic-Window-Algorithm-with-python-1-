@@ -15,6 +15,7 @@ controlar movimento diferencial das rodas
 Toda a lógica foi desenvolvida em Python utilizando comunicação com o CoppeliaSim via ZMQ Remote API.
 
 Tecnologias Utilizadas
+
 Python 3
 CoppeliaSim Edu
 ZMQ Remote API
@@ -26,6 +27,7 @@ Desvio de obstáculos
 Sistema de fuga para regiões presas
 Controle diferencial das rodas
 Parada automática ao alcançar o objetivo
+
 Estrutura do Projeto
 📂 VREP-Dynamic-Window-Algorithm-with-python
 │
@@ -36,6 +38,7 @@ Estrutura do Projeto
 ├── cenario_dwa_funcional.ttt
 ├── Relatorio_Final_Robotica.pdf
 └── README.md
+
 Como Executar
 1. Abrir o cenário no CoppeliaSim
 cenario_dwa_funcional.ttt
@@ -51,6 +54,7 @@ localizar o Target
 evitar obstáculos
 sair de regiões presas
 navegar autonomamente no ambiente
+
 Referências
 FOX, Dieter; BURGARD, Wolfram; THRUN, Sebastian. The Dynamic Window Approach to Collision Avoidance.
 PythonRobotics — Dynamic Window Approach
