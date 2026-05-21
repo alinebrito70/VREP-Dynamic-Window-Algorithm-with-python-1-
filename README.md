@@ -30,13 +30,21 @@ Parada automática ao alcançar o objetivo
 
 Estrutura do Projeto
 📂 VREP-Dynamic-Window-Algorithm-with-python
+
 │
+
 ├── dwa_create2_zmq.py
+
 ├── teste_conexao_zmq.py
+
 ├── script_create.py
+
 ├── script_mirror.py
+
 ├── cenario_dwa_funcional.ttt
+
 ├── Relatorio_Final_Robotica.pdf
+
 └── README.md
 
 Como Executar
