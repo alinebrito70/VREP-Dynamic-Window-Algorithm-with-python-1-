@@ -27,7 +27,8 @@ O fluxo principal do projeto é:
 ---
 
 ## Estrutura do Projeto
-
+```text
+.
 ├── main.py
 ├── dynamic_window_approach.py
 ├── mapa_ocupacao.py
@@ -41,7 +42,8 @@ O fluxo principal do projeto é:
 │   ├── Apresentacao_Navegacao_Autonoma.pptx
 │   └── figuras/
 └── legado/
----
+```
+
 
 ## Pré-requisitos
 Python 3.8 ou superior;
@@ -63,11 +65,10 @@ pip install matplotlib reportlab python-pptx pillow
 ## Como Executar
 Abra o CoppeliaSim.
 Carregue a cena:
-cenas/cena_com_obstaculos.ttt
+cenas/cena_com_obstaculos.ttt , 
 Teste a conexão, se necessário:
-python utils/testar_conexao.py
+python utils/testar_conexao.py. 
 Execute o projeto:
 python main.py
-Ajustes Úteis
 
 
