@@ -1,71 +1,73 @@
-# Navegação Autônoma de Robôs Móveis — A* Melhorado + DWA + Grade de Ocupação (CoppeliaSim)
+# Navegação Autônoma com A* Aprimorado e DWA
 
-Sistema híbrido de navegação autônoma para uma base móvel diferencial simulada no **CoppeliaSim**,
-controlada por Python via **ZeroMQ Remote API**. Integra:
+Projeto desenvolvido para a disciplina de **Robótica I** da **UNIVASF**, com o objetivo de implementar uma arquitetura híbrida de navegação autônoma para um robô móvel diferencial no **CoppeliaSim**, utilizando **Python** e a **ZeroMQ Remote API**.
 
-- **Planejador global A\* melhorado** (Guo et al., 2024): heurística ponderada `f(n)=g(n)+(1+d/D)·h(n)`,
-  seleção de pontos-chave (remoção de colineares + simplificação por linha de visão) e suavização por
-  **curvas de Bézier de 2ª ordem**.
-- **Mapa de Grade de Ocupação** construído por um **sensor de visão** criado por código, apontado para
-  baixo sobre a cena (modelo de Moravec & Elfes, 1985). É a **fonte primária de obstáculos** do A*.
-- **Controlador local DWA** (Dynamic Window Approach) com fusão guiada pelos pontos-chave do A* e camada
-  reativa por sensores de proximidade para obstáculos dinâmicos.
+O sistema combina:
 
-Autor: **Heitor Freire Alves** — Disciplina de Robótica, UNIVASF.
+- **A\* Aprimorado** para planejamento global da rota;
+- **Grade de ocupação** para representar o ambiente e os obstáculos;
+- **DWA (Dynamic Window Approach)** para controle local e desvio de obstáculos;
+- **CoppeliaSim** para simulação do robô e do ambiente.
 
-## 📁 Estrutura
+---
 
-```
-main.py                     # Loop principal (init, grade de ocupação, A*+DWA, atuação)
-dynamic_window_approach.py  # A* melhorado + DWAController
-mapa_ocupacao.py            # Sensor de visão + Mapa de Grade de Ocupação
-utils/
-  testar_conexao.py         # Testa a conexão com o CoppeliaSim
-  listar_objetos.py         # Lista os objetos da cena
-cenas/
-  scena com obstaculos.ttt  # Cena oficial
-docs/
-  Relatorio_Final_Navegacao_Autonoma.pdf   # Relatório final
-  Apresentacao_Navegacao_Autonoma.pptx     # Apresentação
-  artigo_Guo2024_improved_Astar_DWA.pdf    # Artigo de referência
-  figuras/                                 # Figuras geradas para o relatório
-legado/                     # Arquivos antigos preservados (não usados)
-```
+## Funcionamento
 
-## 🛠️ Pré-requisitos
+O fluxo principal do projeto é:
 
-- Python 3.8+
-- CoppeliaSim (compatível com a ZeroMQ Remote API)
+1. Conectar o Python ao CoppeliaSim;
+2. Capturar o ambiente com um sensor de visão;
+3. Gerar a grade de ocupação;
+4. Calcular a rota global com A\*;
+5. Selecionar pontos-chave da rota;
+6. Usar o DWA para gerar comandos de velocidade;
+7. Enviar os comandos para o robô;
+8. Navegar até o objetivo evitando obstáculos.
 
-Instale as dependências:
-```bash
+---
+
+## Estrutura do Projeto
+
+├── main.py
+├── dynamic_window_approach.py
+├── mapa_ocupacao.py
+├── utils/
+│   ├── testar_conexao.py
+│   └── listar_objetos.py
+├── cenas/
+│   └── cena_com_obstaculos.ttt
+├── docs/
+│   ├── Relatorio_Final_Navegacao_Autonoma.pdf
+│   ├── Apresentacao_Navegacao_Autonoma.pptx
+│   └── figuras/
+└── legado/
+---
+
+## Pré-requisitos
+Python 3.8 ou superior;
+CoppeliaSim;
+ZeroMQ Remote API.
+
+---
+
+## Instale as dependências principais:
+
 pip install numpy coppeliasim-zmqremoteapi-client
-# Opcional, apenas para regenerar relatório/figuras/apresentação:
-pip install reportlab matplotlib python-pptx pillow
-```
 
-## ▶️ Como executar
+Dependências opcionais para geração de figuras e documentos:
 
-1. Abra `cenas/scena com obstaculos.ttt` no CoppeliaSim.
-2. (Opcional) Teste a conexão: `python utils/testar_conexao.py`
-3. (Opcional) Visualize a grade de ocupação isoladamente: `python mapa_ocupacao.py`
-4. Rode a navegação: `python main.py`
+pip install matplotlib reportlab python-pptx pillow
 
-O script inicia a simulação em modo *stepping*, constrói a grade de ocupação, planeja a rota com o A*
-melhorado e navega até o `/Goal` com o DWA.
+---
 
-## ⚙️ Ajustes úteis
+## Como Executar
+Abra o CoppeliaSim.
+Carregue a cena:
+cenas/cena_com_obstaculos.ttt
+Teste a conexão, se necessário:
+python utils/testar_conexao.py
+Execute o projeto:
+python main.py
+Ajustes Úteis
 
-- **Se o robô andar "de costas":** troque `SINAL_FRENTE = +1` para `-1` no topo de `main.py`
-  (a frente é detectada automaticamente pelo sensor dianteiro, mas isso inverte 180° se necessário).
-- **Grade de ocupação:** parâmetros em `mapa_ocupacao.py` → classe `ConfigGrade`
-  (`resolucao`, `altura`, `altura_min_obstaculo`, `flip_x`, `flip_y`). Se a grade sair espelhada em
-  relação à cena, ajuste `flip_x` / `flip_y`.
-- **Comportamento do DWA:** ganhos em `DWAController.__init__` (`dynamic_window_approach.py`).
 
-## 📚 Referências
-
-- GUO, H. et al. *Path planning of greenhouse electric crawler tractor based on the improved A\* and DWA
-  algorithms.* Computers and Electronics in Agriculture, v. 227, 109596, 2024.
-- MORAVEC, H.; ELFES, A. *High resolution maps from wide angle sonar.* Proc. 1985 IEEE ICRA, p. 116-121.
-- FOX, D.; BURGARD, W.; THRUN, S. *The Dynamic Window Approach to Collision Avoidance.* IEEE R&A Mag., 1997.
